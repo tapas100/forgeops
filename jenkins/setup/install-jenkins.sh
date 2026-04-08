@@ -3,25 +3,27 @@
 # ForgeOps Platform — Jenkins Installation Script
 # Installs Jenkins LTS inside a Podman (rootless) container
 #
-# TARGET: Oracle Cloud Always Free Tier — VM.Standard.A1.Flex (Ampere ARM)
-#   OS    : Ubuntu 22.04 Minimal (Canonical)  ← lean, no snap, no GUI
-#   Shape : 2 OCPU (ARM aarch64) | 12 GB RAM | ~50 GB boot volume
-#   Free pool: 4 OCPU + 24 GB RAM total across all Always Free instances
+# TARGET: Hetzner Cloud — CAX11 (Ampere ARM)
+#   OS    : Ubuntu 22.04 (Canonical)
+#   Server: 2 vCPU (ARM aarch64) | 4 GB RAM | 40 GB NVMe SSD
+#   Cost  : €3.29/month  (~$3.50) — best value CI/CD server available
+#   Region: Falkenstein / Nuremberg / Helsinki / Ashburn
+#
+# Why Hetzner over Oracle Free Tier:
+#   ✅ Enterprise-grade NVMe SSD  (Oracle uses HDD)
+#   ✅ 20 Gbps network            (Oracle: 0.48 Gbps)
+#   ✅ Instant provisioning       (Oracle: capacity issues)
+#   ✅ Stable — no surprise terminations
+#   ✅ Real support
 #
 # What this script does automatically:
 #   1. Installs ALL required packages  (podman, curl, git, fuse-overlayfs …)
-#   2. Skips swap creation             → 12 GB RAM is more than sufficient
-#   3. Tunes kernel for performance    (not memory-saving)
+#   2. Creates 2 GB swap as safety net (4 GB RAM — swap prevents OOM on big builds)
+#   3. Tunes kernel for NVMe + ARM performance
 #   4. Disables wasteful OS services   (snapd, multipathd, apport …)
 #   5. Configures Podman rootless      (subuid/subgid, socket, storage)
-#   6. Starts Jenkins with G1GC + generous heap (fast builds, parallel stages)
+#   6. Starts Jenkins with G1GC + balanced heap (2 GB — fits in 4 GB safely)
 #   7. Installs a systemd user service for auto-start on every reboot
-#
-# WHY NOT "PODMAN LITE"?
-#   Podman IS already the lightweight alternative to Docker.
-#   It is daemonless (zero background process when idle),
-#   rootless (no root daemon), and uses ~0 MB RAM when not running.
-#   There is no lighter container runtime suitable for production use.
 # =============================================================================
 set -euo pipefail
 
@@ -34,18 +36,17 @@ JENKINS_HOME="/opt/forgeops/jenkins_home"
 JENKINS_HTTP_PORT="8080"
 JENKINS_AGENT_PORT="50000"
 
-# Memory limits for the Jenkins container
-# A1.Flex 2 OCPU / 12 GB — Jenkins gets 4 GB, leaving 8 GB for the OS,
-# Nginx, Podman builds, and up to 3 parallel app containers.
-JENKINS_MEMORY="4g"            # Hard container memory limit
-JENKINS_MEMORY_SWAP="4g"       # Same as limit — no need for swap
-JENKINS_JVM_MAX_HEAP="2g"      # -Xmx  — G1GC works well at 2 GB+
-JENKINS_JVM_MIN_HEAP="512m"    # -Xms  — start with 512 MB, grow as needed
-JENKINS_JVM_METASPACE="256m"   # Class metadata — plenty of room
-JENKINS_CPUS="1.8"             # Use 1.8 of 2 OCPUs — leave 0.2 for OS
+# Memory limits — Hetzner CAX11: 4 GB RAM
+# Jenkins gets 2.5 GB, leaving ~1.5 GB for OS + Nginx + app containers
+JENKINS_MEMORY="2500m"         # Hard container memory limit
+JENKINS_MEMORY_SWAP="4g"       # Allow swap overflow on heavy builds
+JENKINS_JVM_MAX_HEAP="1500m"   # -Xmx  — G1GC comfortable at 1.5 GB
+JENKINS_JVM_MIN_HEAP="512m"    # -Xms  — start at 512m, grow as needed
+JENKINS_JVM_METASPACE="192m"   # Class metadata space
+JENKINS_CPUS="1.8"             # Use 1.8 of 2 vCPUs — leave 0.2 for OS
 
 SWAP_FILE="/swapfile"
-SWAP_SIZE_GB=0                 # No swap needed — 12 GB RAM is sufficient
+SWAP_SIZE_GB=2                 # 2 GB swap → 6 GB effective on heavy builds
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'
@@ -64,13 +65,13 @@ header() {
 # ──────────────────────────────────────────────────────────────────────────────
 # Pre-flight checks
 # ──────────────────────────────────────────────────────────────────────────────
-header "ForgeOps — Jenkins Installer (Ubuntu 22.04 Minimal / Ampere A1.Flex)"
+header "ForgeOps — Jenkins Installer (Hetzner CAX11 / Ubuntu 22.04 / ARM)"
 
 [[ $EUID -eq 0 ]] && error "Do NOT run as root. Podman rootless requires a regular user."
 
 ARCH=$(uname -m)
 log "OS: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')  |  Arch: ${ARCH}"
-[[ "${ARCH}" != "aarch64" ]] && warn "Arch is ${ARCH} — this script is optimised for aarch64 (Ampere A1.Flex)."
+[[ "${ARCH}" != "aarch64" ]] && warn "Arch is ${ARCH} — this script is optimised for aarch64 (Hetzner CAX11 ARM)."
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 1 — Install ALL required packages from apt
@@ -120,19 +121,18 @@ log "Podman: $(podman --version)"
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 2 — Swap file (2 GB) → effective 3 GB memory
 # ──────────────────────────────────────────────────────────────────────────────
-header "Step 2 — Memory check (12 GB RAM — no swap needed)"
+header "Step 2 — Memory check + swap setup (Hetzner CAX11: 4 GB RAM)"
 
 TOTAL_RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 log "Total RAM: ${TOTAL_RAM_MB} MB"
 
-if [[ ${TOTAL_RAM_MB} -ge 8000 ]]; then
-  ok "Excellent! ${TOTAL_RAM_MB} MB RAM detected — Ampere A1.Flex confirmed."
-  ok "No swap file needed. Jenkins gets 4 GB, OS + builds get the rest."
-elif [[ ${TOTAL_RAM_MB} -ge 1800 ]]; then
-  log "Moderate RAM (${TOTAL_RAM_MB} MB) — skipping swap, still sufficient for Jenkins."
-else
-  warn "Only ${TOTAL_RAM_MB} MB RAM — creating ${SWAP_SIZE_GB} GB swap as fallback..."
-  if ! swapon --show | grep -q "${SWAP_FILE}"; then
+if [[ ${TOTAL_RAM_MB} -ge 3500 ]]; then
+  ok "${TOTAL_RAM_MB} MB RAM detected — Hetzner CAX11 confirmed."
+  log "Creating ${SWAP_SIZE_GB} GB swap as safety net for heavy builds..."
+
+  if swapon --show | grep -q "${SWAP_FILE}"; then
+    ok "Swap already active at ${SWAP_FILE} — skipping."
+  else
     sudo fallocate -l "${SWAP_SIZE_GB}G" "${SWAP_FILE}" 2>/dev/null \
       || sudo dd if=/dev/zero of="${SWAP_FILE}" bs=1M count=$((SWAP_SIZE_GB * 1024)) status=progress
     sudo chmod 600 "${SWAP_FILE}"
@@ -140,15 +140,24 @@ else
     sudo swapon  "${SWAP_FILE}"
     grep -q "${SWAP_FILE}" /etc/fstab \
       || echo "${SWAP_FILE} none swap sw 0 0" | sudo tee -a /etc/fstab
-    ok "Swap created and activated."
+    ok "Swap created: ${SWAP_FILE} (${SWAP_SIZE_GB} GB) — total effective: $((TOTAL_RAM_MB/1024 + SWAP_SIZE_GB)) GB"
   fi
+else
+  warn "Only ${TOTAL_RAM_MB} MB RAM — creating ${SWAP_SIZE_GB} GB swap..."
+  sudo fallocate -l "${SWAP_SIZE_GB}G" "${SWAP_FILE}" 2>/dev/null \
+    || sudo dd if=/dev/zero of="${SWAP_FILE}" bs=1M count=$((SWAP_SIZE_GB * 1024)) status=progress
+  sudo chmod 600 "${SWAP_FILE}"
+  sudo mkswap "${SWAP_FILE}" && sudo swapon "${SWAP_FILE}"
+  grep -q "${SWAP_FILE}" /etc/fstab \
+    || echo "${SWAP_FILE} none swap sw 0 0" | sudo tee -a /etc/fstab
+  ok "Swap activated."
 fi
 
 log "Memory layout:"
 free -h | awk 'NR<=3 {printf "  %s\n", $0}'
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Step 3 — Kernel tuning for performance (A1.Flex 2 OCPU / 12 GB)
+# Step 3 — Kernel tuning for NVMe + ARM performance (Hetzner CAX11)
 # ──────────────────────────────────────────────────────────────────────────────
 header "Step 3 — Kernel performance tuning"
 
@@ -160,11 +169,11 @@ apply_sysctl() {
   log "sysctl ${key}=${val}"
 }
 
-# With 12 GB RAM we tune for throughput, not memory saving
-apply_sysctl vm.swappiness              1    # Almost never swap — we have plenty of RAM
+# Balanced — 4 GB RAM with swap safety net
+apply_sysctl vm.swappiness              10   # Use swap only when RAM is low
 apply_sysctl vm.vfs_cache_pressure      50   # Retain directory/inode cache longer
 apply_sysctl vm.overcommit_memory       1    # Allow JVM fork() overcommit
-apply_sysctl vm.dirty_ratio             20   # More write buffering → faster builds
+apply_sysctl vm.dirty_ratio             20   # More write buffering → faster NVMe builds
 apply_sysctl vm.dirty_background_ratio  5    # Start flushing early in background
 apply_sysctl net.core.somaxconn         1024 # Larger socket backlog for Jenkins HTTP
 apply_sysctl fs.file-max                100000 # High open-file limit for containers
@@ -372,12 +381,13 @@ podman stats --no-stream "${JENKINS_CONTAINER_NAME}" \
 # ──────────────────────────────────────────────────────────────────────────────
 header "✅  Installation Complete"
 echo ""
-echo -e "  VM shape:    ${CYAN}VM.Standard.A1.Flex  (2 OCPU ARM / 12 GB RAM)${NC}"
-echo -e "  OS:          ${CYAN}Ubuntu 22.04 Minimal (aarch64)${NC}"
+echo -e "  Server:      ${CYAN}Hetzner CAX11  (2 vCPU ARM / 4 GB RAM / 40 GB NVMe)${NC}"
+echo -e "  OS:          ${CYAN}Ubuntu 22.04 (aarch64)${NC}"
 echo -e "  Podman:      ${CYAN}$(podman --version)  (rootless, daemonless)${NC}"
+echo -e "  Swap:        ${CYAN}${SWAP_SIZE_GB} GB  →  6 GB effective memory${NC}"
 echo -e "  Jenkins RAM: ${CYAN}${JENKINS_MEMORY} container limit  |  ${JENKINS_JVM_MIN_HEAP}→${JENKINS_JVM_MAX_HEAP} heap  |  G1GC${NC}"
 echo -e "  Jenkins URL: ${CYAN}http://127.0.0.1:${JENKINS_HTTP_PORT}/jenkins${NC}"
-echo -e "  Executors:   ${CYAN}2  (parallel builds supported on A1.Flex)${NC}"
+echo -e "  Executors:   ${CYAN}2  (parallel builds supported)${NC}"
 echo ""
 echo -e "  ${YELLOW}Useful commands:${NC}"
 echo -e "    podman logs -f ${JENKINS_CONTAINER_NAME}             # live logs"
@@ -386,8 +396,9 @@ echo -e "    systemctl --user status container-jenkins  # service status"
 echo -e "    systemctl --user restart container-jenkins # restart"
 echo ""
 echo -e "  ${YELLOW}Next steps:${NC}"
-echo -e "    1. Copy Nginx config:  ${CYAN}sudo cp nginx/conf.d/jenkins.conf /etc/nginx/conf.d/${NC}"
-echo -e "    2. Replace domain:     ${CYAN}sudo sed -i 's/YOUR_DOMAIN_HERE/ci.yourdomain.com/g' /etc/nginx/conf.d/jenkins.conf${NC}"
-echo -e "    3. Get TLS cert:       ${CYAN}sudo certbot --nginx -d ci.yourdomain.com${NC}"
-echo -e "    4. Configure Jenkins:  ${CYAN}./jenkins/setup/configure-jenkins.sh${NC}"
+echo -e "    1. Install Nginx:      ${CYAN}sudo apt-get install -y nginx certbot python3-certbot-nginx${NC}"
+echo -e "    2. Copy Nginx config:  ${CYAN}sudo cp nginx/conf.d/jenkins.conf /etc/nginx/conf.d/${NC}"
+echo -e "    3. Replace domain:     ${CYAN}sudo sed -i 's/YOUR_DOMAIN_HERE/ci.yourdomain.com/g' /etc/nginx/conf.d/jenkins.conf${NC}"
+echo -e "    4. Get TLS cert:       ${CYAN}sudo certbot --nginx -d ci.yourdomain.com${NC}"
+echo -e "    5. Configure Jenkins:  ${CYAN}./jenkins/setup/configure-jenkins.sh${NC}"
 echo ""

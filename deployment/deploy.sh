@@ -15,8 +15,8 @@ APP_NAME=""
 IMAGE=""
 HOST_PORT=""
 ENV_FILE=""
-MEMORY="512m"       # A1.Flex has 12 GB — each app container gets 512 MB
-CPUS="0.5"          # 0.5 of 2 OCPUs per app container
+MEMORY="256m"       # Hetzner CAX11: 4 GB total — Jenkins takes 2.5 GB, each app gets 256m
+CPUS="0.4"          # 0.4 of 2 vCPUs per app container
 RESTART_POLICY="unless-stopped"
 # Directory that holds a file named "${APP_NAME}.previous" with the last image ref
 STATE_DIR="/opt/forgeops/state"

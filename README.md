@@ -1,6 +1,6 @@
 # 🔧 ForgeOps Platform
 
-> Production-grade CI/CD platform running on Oracle Cloud Always Free Tier  
+> Production-grade CI/CD platform running on Hetzner Cloud (CAX11 ARM)  
 > Powered by Jenkins + Podman (rootless, daemonless) + Nginx
 
 ---
@@ -123,17 +123,21 @@ forgeops/
 
 ### Prerequisites
 
-- Oracle Cloud Always Free Tier VM (Ubuntu 22.04 LTS, 1 OCPU, 1GB RAM minimum)
+- **Hetzner Cloud CAX11** server (2 vCPU ARM / 4 GB RAM / 40 GB NVMe — ~€3.29/mo)
+- Ubuntu 22.04 LTS (select during Hetzner server creation)
 - Domain name (or use IP directly for testing)
 - GitHub account with repositories to connect
 
-### 1. Provision the VM
+### 1. Provision the Server
 
 ```bash
-# On Oracle Cloud, create a VM instance:
-# - Shape: VM.Standard.E2.1.Micro (Always Free)
-# - OS: Ubuntu 22.04 LTS
-# - Open ports: 22 (SSH), 80 (HTTP), 443 (HTTPS)
+# On Hetzner Cloud Console (console.hetzner.cloud):
+# 1. New Project → Add Server
+# 2. Location: Falkenstein / Nuremberg / Helsinki (pick closest)
+# 3. OS Image: Ubuntu 22.04
+# 4. Type: Shared vCPU → ARM64 (Ampere) → CAX11 (2 vCPU / 4 GB / €3.29)
+# 5. Add your SSH public key
+# 6. Create & Buy (firewall opens 22/80/443 by default)
 ```
 
 ### 2. Install Podman

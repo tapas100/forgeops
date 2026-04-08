@@ -54,8 +54,8 @@ jenkins:
             value: "${DEPLOY_HOST:-localhost}"
 
   # ── Number of executors on built-in node ───────────────────────────────────
-  # A1.Flex has 2 OCPUs + 12 GB RAM — 2 parallel builds are safe.
-  # Jenkins gets 4 GB container memory, leaving 8 GB for the OS + app containers.
+  # Hetzner CAX11: 2 vCPU / 4 GB RAM.
+  # Jenkins gets 2.5 GB — 2 parallel builds are safe with the 2 GB swap buffer.
   numExecutors: 2
 
   # ── Agent protocols ────────────────────────────────────────────────────────
