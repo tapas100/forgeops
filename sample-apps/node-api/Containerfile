@@ -1,0 +1,58 @@
+# =============================================================================
+# ForgeOps — node-api Containerfile
+# Podman-compatible multi-stage build (NOT Docker)
+# Result: minimal, non-root production image
+# =============================================================================
+
+# ── Stage 1: Build / install dependencies ─────────────────────────────────────
+FROM docker.io/node:20-alpine AS builder
+
+# Add metadata
+LABEL stage="builder"
+
+WORKDIR /build
+
+# Copy package files first (layer caching — reinstall only when deps change)
+COPY package.json package-lock.json ./
+
+# Install production dependencies only
+RUN npm ci --omit=dev --prefer-offline --no-audit --no-fund \
+    && npm cache clean --force
+
+# Copy application source
+COPY src/ ./src/
+
+# ── Stage 2: Production image ──────────────────────────────────────────────────
+FROM docker.io/node:20-alpine AS production
+
+# OCI standard labels
+LABEL org.opencontainers.image.title="node-api" \
+      org.opencontainers.image.description="ForgeOps sample Node.js API" \
+      org.opencontainers.image.vendor="ForgeOps Platform" \
+      org.opencontainers.image.source="https://github.com/YOUR_ORG/forgeops"
+
+# Install dumb-init for proper PID 1 / signal handling
+RUN apk add --no-cache dumb-init=1.2.5-r3
+
+# Create non-root user (principle of least privilege)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+WORKDIR /app
+
+# Copy only the built application from stage 1
+COPY --from=builder --chown=appuser:appgroup /build/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /build/src         ./src
+
+# Switch to non-root
+USER appuser
+
+# Expose the container port (documentation only — not a firewall rule)
+EXPOSE 3000
+
+# Health check so container orchestrators know when the app is ready
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
+# Use dumb-init to reap zombie processes and forward signals correctly
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["node", "src/index.js"]

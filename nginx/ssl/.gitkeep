@@ -1,0 +1,16 @@
+# SSL placeholder — SSL certificates are managed by certbot
+# DO NOT commit real certificates to this repository
+
+# After running: sudo certbot --nginx -d your-domain.com
+# Certbot stores certificates at:
+#   /etc/letsencrypt/live/your-domain.com/fullchain.pem
+#   /etc/letsencrypt/live/your-domain.com/privkey.pem
+
+# The nginx/conf.d/jenkins.conf references these paths.
+# This directory is a placeholder for custom/self-signed certs
+# used during development (before certbot is configured).
+
+# To generate a self-signed cert for local testing:
+#   openssl req -x509 -newkey rsa:4096 -keyout ssl/key.pem \
+#       -out ssl/cert.pem -days 365 -nodes \
+#       -subj "/CN=localhost"

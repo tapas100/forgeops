@@ -1,0 +1,62 @@
+# =============================================================================
+# ForgeOps Platform — Required Jenkins Plugins
+# Format: plugin-id[:version]   (no version = install latest)
+# =============================================================================
+
+# ── Core Pipeline ──────────────────────────────────────────────────────────────
+workflow-aggregator          # Pipeline suite (Pipeline DSL)
+pipeline-stage-view          # Pipeline stage visualization
+blueocean                    # Modern UI for pipelines
+pipeline-graph-analysis      # Dependency analysis between pipeline stages
+
+# ── Shared Library Support ─────────────────────────────────────────────────────
+workflow-cps-global-lib      # Global Pipeline Libraries (shared library)
+
+# ── Source Control ─────────────────────────────────────────────────────────────
+git                          # Git SCM integration
+github                       # GitHub-specific integration (webhooks, status)
+github-branch-source         # GitHub organization/multibranch support
+gitlab-plugin                # GitLab integration (optional)
+
+# ── Configuration as Code ──────────────────────────────────────────────────────
+configuration-as-code        # JCasC — manage Jenkins config via YAML
+
+# ── Credentials & Security ─────────────────────────────────────────────────────
+credentials                  # Core credentials API
+credentials-binding          # Bind credentials to environment variables
+plain-credentials            # Store plain text/secret text credentials
+ssh-credentials              # SSH private key credentials
+mask-passwords               # Mask passwords in build output
+
+# ── Build Tools ────────────────────────────────────────────────────────────────
+nodejs                       # Node.js tool installer
+timestamper                  # Add timestamps to console output
+ansicolor                    # ANSI colour in console output
+
+# ── Notifications ──────────────────────────────────────────────────────────────
+slack                        # Slack notifications
+email-ext                    # Extended email notifications
+build-user-vars-plugin       # Expose build user info to pipeline
+
+# ── Test Reporting ─────────────────────────────────────────────────────────────
+junit                        # JUnit test result publisher
+xunit                        # xUnit test result publisher (k6 reports)
+htmlpublisher                # Publish HTML reports (coverage, k6)
+warnings-ng                  # Static analysis warnings (lint results)
+
+# ── Parallel Execution ─────────────────────────────────────────────────────────
+parallel-test-executor       # Run tests in parallel across agents
+
+# ── Container / Podman ─────────────────────────────────────────────────────────
+docker-workflow               # Pipeline Docker steps (reused for Podman socket)
+
+# ── Utility ────────────────────────────────────────────────────────────────────
+ws-cleanup                   # Workspace cleanup post-build
+throttle-concurrents         # Rate-limit concurrent builds
+build-timeout                # Abort hung builds automatically
+rebuild                      # Manually re-trigger a build
+parameterized-trigger        # Trigger downstream jobs with parameters
+copyartifact                 # Copy artifacts between jobs
+
+# ── Multibranch ────────────────────────────────────────────────────────────────
+multibranch-scan-webhook-trigger  # Trigger scans on webhook events

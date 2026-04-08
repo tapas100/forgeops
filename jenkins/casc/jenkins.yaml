@@ -1,0 +1,166 @@
+# =============================================================================
+# ForgeOps Platform — Jenkins Configuration as Code (JCasC)
+# Applied automatically by configure-jenkins.sh
+# =============================================================================
+
+jenkins:
+  systemMessage: |
+    🔧 ForgeOps CI/CD Platform
+    Managed by Configuration-as-Code. Do not edit settings manually.
+
+  # ── Security realm ─────────────────────────────────────────────────────────
+  securityRealm:
+    local:
+      allowsSignup: false
+      enableCaptcha: false
+      users:
+        - id: "admin"
+          name: "ForgeOps Admin"
+          description: "Platform administrator"
+          # Password is set via JENKINS_ADMIN_PASSWORD env var (bcrypt hash)
+          # Generate: echo -n "password" | htpasswd -niB admin | cut -d: -f2
+          password: "${JENKINS_ADMIN_PASSWORD_HASH}"
+
+  # ── Authorization strategy ─────────────────────────────────────────────────
+  authorizationStrategy:
+    roleBased:
+      roles:
+        global:
+          - name: "admin"
+            description: "Full access"
+            permissions:
+              - "Overall/Administer"
+            assignments:
+              - "admin"
+          - name: "developer"
+            description: "Build & view access"
+            permissions:
+              - "Overall/Read"
+              - "Job/Build"
+              - "Job/Read"
+              - "Job/Workspace"
+              - "View/Read"
+            assignments: []
+
+  # ── Global node properties ──────────────────────────────────────────────────
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "FORGEOPS_VERSION"
+            value: "1.0.0"
+          - key: "REGISTRY_HOST"
+            value: "${REGISTRY_HOST:-localhost:5000}"
+          - key: "DEPLOY_HOST"
+            value: "${DEPLOY_HOST:-localhost}"
+
+  # ── Number of executors on built-in node ───────────────────────────────────
+  # Keep low — the controller should orchestrate, not build
+  numExecutors: 2
+
+  # ── Agent protocols ────────────────────────────────────────────────────────
+  agentProtocols:
+    - "JNLP4-connect"
+    - "Ping"
+
+  # ── Crumb issuer (CSRF protection) ─────────────────────────────────────────
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: true
+
+  # ── Quiet period ───────────────────────────────────────────────────────────
+  quietPeriod: 5
+
+  # ── SCM checkout retry ─────────────────────────────────────────────────────
+  scmCheckoutRetryCount: 2
+
+# ── Global Pipeline Libraries ──────────────────────────────────────────────────
+unclassified:
+  globalLibraries:
+    libraries:
+      - name: "forgeops-shared"
+        description: "ForgeOps Shared Pipeline Library"
+        defaultVersion: "main"
+        implicit: false
+        allowVersionOverride: true
+        includeInChangesets: false
+        retriever:
+          modernSCM:
+            scm:
+              git:
+                remote: "${FORGEOPS_REPO_URL:-https://github.com/YOUR_ORG/forgeops.git}"
+                credentialsId: "github-token"
+                traits:
+                  - gitBranchDiscovery
+
+  # ── Slack notifications ─────────────────────────────────────────────────────
+  slackNotifier:
+    teamDomain: "${SLACK_TEAM_DOMAIN:-your-workspace}"
+    tokenCredentialId: "slack-webhook"
+    room: "#deployments"
+    botUser: true
+
+  # ── Timestamper ────────────────────────────────────────────────────────────
+  timestamperConfig:
+    allPipelines: true
+
+  # ── AnsiColor ──────────────────────────────────────────────────────────────
+  ansiColorBuildWrapper:
+    globalColorMapName: "xterm"
+
+  # ── Build timeout (abort builds stuck > 45 min) ────────────────────────────
+  buildTimeoutWrapper:
+    operationList:
+      - absolute:
+          timeoutMinutes: 45
+          failBuild: true
+
+  # ── Git SCM defaults ───────────────────────────────────────────────────────
+  gitHubPluginConfig:
+    configs:
+      - credentialsId: "github-token"
+        name: "GitHub"
+    hookSecretConfig:
+      credentialsId: "github-webhook-secret"
+
+# ── Tool auto-installers ───────────────────────────────────────────────────────
+tool:
+  nodejs:
+    installations:
+      - name: "nodejs-20"
+        properties:
+          - installSource:
+              installers:
+                - nodeJSInstaller:
+                    id: "20.11.1"
+                    npmPackagesRefreshHours: 72
+
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
+
+# ── Credentials (placeholders — fill real values via Jenkins UI or env vars) ──
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - string:
+              id: "github-token"
+              description: "GitHub Personal Access Token"
+              secret: "${GITHUB_TOKEN}"
+              scope: GLOBAL
+          - string:
+              id: "registry-token"
+              description: "Container Registry Push Token"
+              secret: "${REGISTRY_TOKEN}"
+              scope: GLOBAL
+          - string:
+              id: "slack-webhook"
+              description: "Slack Incoming Webhook URL"
+              secret: "${SLACK_WEBHOOK_URL}"
+              scope: GLOBAL
+          - string:
+              id: "github-webhook-secret"
+              description: "GitHub Webhook HMAC Secret"
+              secret: "${GITHUB_WEBHOOK_SECRET}"
+              scope: GLOBAL

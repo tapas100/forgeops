@@ -1,0 +1,35 @@
+# =============================================================================
+# ForgeOps — node-worker Containerfile
+# Podman-compatible multi-stage build — minimal, non-root production image
+# =============================================================================
+
+FROM docker.io/node:20-alpine AS builder
+
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --prefer-offline --no-audit --no-fund \
+    && npm cache clean --force
+COPY src/ ./src/
+
+# ── Production stage ──────────────────────────────────────────────────────────
+FROM docker.io/node:20-alpine AS production
+
+LABEL org.opencontainers.image.title="node-worker" \
+      org.opencontainers.image.description="ForgeOps sample Node.js background worker" \
+      org.opencontainers.image.vendor="ForgeOps Platform"
+
+RUN apk add --no-cache dumb-init=1.2.5-r3 \
+    && addgroup -S appgroup \
+    && adduser  -S appuser -G appgroup
+
+WORKDIR /app
+COPY --from=builder --chown=appuser:appgroup /build/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /build/src         ./src
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD node -e "process.exit(0)" || exit 1
+
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["node", "src/worker.js"]

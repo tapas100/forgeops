@@ -1,0 +1,26 @@
+/**
+ * node-worker — Jenkinsfile
+ * Minimal — delegates all logic to the ForgeOps shared library.
+ */
+@Library('forgeops-shared') _
+
+String branch = env.GIT_BRANCH ?: env.BRANCH_NAME ?: ''
+boolean isMain = branch.endsWith('main') || branch.endsWith('master')
+boolean isTag  = env.TAG_NAME != null
+
+if (isMain || isTag) {
+    cdPipeline(
+        appName:  'node-worker',
+        port:     4000,
+        registry: env.REGISTRY_HOST ?: 'localhost:5000',
+        runTests: true,
+        runScan:  true
+    )
+} else {
+    ciPipeline(
+        appName:     'node-worker',
+        port:        4000,
+        nodeVersion: 'nodejs-20',
+        runSecurity: true
+    )
+}

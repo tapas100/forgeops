@@ -1,0 +1,69 @@
+# =============================================================================
+# ForgeOps Platform — Prometheus Configuration (Future Integration)
+# Scrapes Jenkins, Nginx, and application metrics
+# =============================================================================
+
+global:
+  scrape_interval:     30s    # Conservative — Oracle Free Tier has limited CPU
+  evaluation_interval: 30s
+  scrape_timeout:      10s
+
+  # Labels applied to all metrics from this Prometheus instance
+  external_labels:
+    cluster:     'forgeops'
+    environment: 'production'
+
+# ── Alertmanager (configure when ready) ──────────────────────────────────────
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['localhost:9093']
+
+# ── Alert rules (define in separate files) ───────────────────────────────────
+# rule_files:
+#   - /etc/prometheus/rules/*.yml
+
+# ── Scrape targets ────────────────────────────────────────────────────────────
+scrape_configs:
+
+  # ── Prometheus self-monitoring ─────────────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ── Jenkins metrics (requires Prometheus Metrics plugin) ──────────────────
+  # Install: Jenkins → Manage Plugins → "Prometheus metrics"
+  - job_name: 'jenkins'
+    metrics_path: '/jenkins/prometheus'
+    scheme: 'http'
+    static_configs:
+      - targets: ['localhost:8080']
+    # Optional: bearer token if Jenkins requires auth
+    # bearer_token_file: /etc/prometheus/jenkins-token
+
+  # ── Node Exporter (host metrics: CPU, RAM, disk) ───────────────────────────
+  # Install: sudo apt-get install prometheus-node-exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+
+  # ── Nginx stub_status (basic connection metrics) ──────────────────────────
+  # Add to nginx.conf:
+  #   location /nginx_status { stub_status on; allow 127.0.0.1; deny all; }
+  # Then install nginx-prometheus-exporter
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['localhost:9113']
+
+  # ── Application metrics (add per-app when they expose /metrics) ───────────
+  - job_name: 'node-api'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['localhost:3000']
+    # Only scrape if app exposes Prometheus-compatible metrics
+    # (add prom-client to your Node.js app)
+
+  - job_name: 'node-worker'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['localhost:4000']

@@ -1,0 +1,44 @@
+/**
+ * node-api — Jenkinsfile
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Minimal Jenkinsfile — delegates 100% of logic to the ForgeOps shared library.
+ * Only customise what is unique to this repo (app name, port, deploy hook).
+ */
+@Library('forgeops-shared') _
+
+// ── Determine which pipeline to run based on branch ──────────────────────────
+String branch = env.GIT_BRANCH ?: env.BRANCH_NAME ?: ''
+boolean isMain = branch.endsWith('main') || branch.endsWith('master')
+boolean isTag  = env.TAG_NAME != null
+
+if (isMain || isTag) {
+    // ── CD Pipeline: build, push, deploy ──────────────────────────────────
+    cdPipeline(
+        appName:    'node-api',
+        port:       3000,
+        registry:   env.REGISTRY_HOST ?: 'localhost:5000',
+        runTests:   true,
+        runScan:    true,
+
+        // Optional: custom deploy logic (runs after image is pushed)
+        // Remove this block to use the default deploy.sh
+        deployHook: { Map ctx ->
+            sh """
+                bash \${WORKSPACE}/../../deployment/deploy.sh \\
+                    --app   "node-api" \\
+                    --image "${ctx.imageTag ? "${env.REGISTRY_HOST ?: 'localhost:5000'}/node-api:${ctx.imageTag}" : env.FULL_IMAGE}" \\
+                    --port  "3000" \\
+                    --env-file "/etc/forgeops/node-api.env"
+            """
+        }
+    )
+} else {
+    // ── CI Pipeline: test every commit ───────────────────────────────────
+    ciPipeline(
+        appName:     'node-api',
+        port:        3000,
+        nodeVersion: 'nodejs-20',
+        runSecurity: true,
+        failSeverity: 'high'
+    )
+}
