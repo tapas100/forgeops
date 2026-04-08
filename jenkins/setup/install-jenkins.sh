@@ -65,13 +65,14 @@ header() {
 # ──────────────────────────────────────────────────────────────────────────────
 # Pre-flight checks
 # ──────────────────────────────────────────────────────────────────────────────
-header "ForgeOps — Jenkins Installer (Hetzner CAX11 / Ubuntu 22.04 / ARM)"
+header "ForgeOps — Jenkins Installer (Hetzner / Ubuntu 24.04 / x86_64)"
 
 [[ $EUID -eq 0 ]] && error "Do NOT run as root. Podman rootless requires a regular user."
 
 ARCH=$(uname -m)
-log "OS: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"')  |  Arch: ${ARCH}"
-[[ "${ARCH}" != "aarch64" ]] && warn "Arch is ${ARCH} — this script is optimised for aarch64 (Hetzner CAX11 ARM)."
+OS_NAME=$(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+log "OS: ${OS_NAME}  |  Arch: ${ARCH}"
+log "Supported architectures: x86_64 and aarch64"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Step 1 — Install ALL required packages from apt
@@ -291,17 +292,7 @@ podman run -d \
   --security-opt=no-new-privileges:true \
   --cap-drop=ALL \
   --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=DAC_OVERRIDE \
-  --env JAVA_OPTS=" \
-    -Xmx${JENKINS_JVM_MAX_HEAP} \
-    -Xms${JENKINS_JVM_MIN_HEAP} \
-    -XX:MaxMetaspaceSize=${JENKINS_JVM_METASPACE} \
-    -XX:+UseG1GC \
-    -XX:G1HeapRegionSize=16m \
-    -XX:+UseStringDeduplication \
-    -XX:+ParallelRefProcEnabled \
-    -Djava.awt.headless=true \
-    -Djenkins.install.runSetupWizard=false \
-    -Dhudson.model.DirectoryBrowserSupport.CSP=default-src 'self'" \
+  --env "JAVA_OPTS=-Xmx${JENKINS_JVM_MAX_HEAP} -Xms${JENKINS_JVM_MIN_HEAP} -XX:MaxMetaspaceSize=${JENKINS_JVM_METASPACE} -XX:+UseG1GC -XX:G1HeapRegionSize=16m -XX:+UseStringDeduplication -XX:+ParallelRefProcEnabled -Djava.awt.headless=true -Djenkins.install.runSetupWizard=false" \
   --env JENKINS_OPTS="--prefix=/jenkins --sessionTimeout=60 --sessionEviction=3600" \
   --label "app=jenkins" \
   --label "managed-by=forgeops" \
@@ -353,18 +344,54 @@ fi
 # ──────────────────────────────────────────────────────────────────────────────
 header "Step 12 — Installing systemd auto-start service"
 
+# Enable linger so user services survive across reboots (no login needed)
+sudo loginctl enable-linger "$(whoami)"
+
+# Write a plain systemd user service file.
+# NOTE: We do NOT use Quadlets here because Podman 4.9's Quadlet Environment=
+# key splits multi-word values into separate --env args, breaking JAVA_OPTS.
+# A plain service file with quoted --env arguments works correctly on all
+# Podman versions >= 3.x.
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 mkdir -p "${SYSTEMD_USER_DIR}"
 
-podman generate systemd \
-  --name "${JENKINS_CONTAINER_NAME}" \
-  --restart-policy unless-stopped \
-  --new \
-  > "${SYSTEMD_USER_DIR}/container-jenkins.service"
+cat > "${SYSTEMD_USER_DIR}/jenkins.service" <<SERVICE
+[Unit]
+Description=Jenkins CI/CD (ForgeOps — Podman rootless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+ExecStartPre=/usr/bin/podman rm -f ${JENKINS_CONTAINER_NAME} 2>/dev/null || true
+ExecStart=/usr/bin/podman run \\
+  --name=${JENKINS_CONTAINER_NAME} \\
+  --rm \\
+  -p 127.0.0.1:${JENKINS_HTTP_PORT}:8080 \\
+  -p 127.0.0.1:${JENKINS_AGENT_PORT}:50000 \\
+  -v ${JENKINS_HOME}:/var/jenkins_home:Z \\
+  --memory=${JENKINS_MEMORY} \\
+  --memory-swap=${JENKINS_MEMORY_SWAP} \\
+  --cpus=${JENKINS_CPUS} \\
+  --security-opt=no-new-privileges:true \\
+  --cap-drop=ALL \\
+  --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=DAC_OVERRIDE \\
+  --env "JAVA_OPTS=-Xmx${JENKINS_JVM_MAX_HEAP} -Xms${JENKINS_JVM_MIN_HEAP} -XX:MaxMetaspaceSize=${JENKINS_JVM_METASPACE} -XX:+UseG1GC -XX:G1HeapRegionSize=16m -XX:+UseStringDeduplication -XX:+ParallelRefProcEnabled -Djava.awt.headless=true -Djenkins.install.runSetupWizard=false" \\
+  --env "JENKINS_OPTS=--prefix=/jenkins --sessionTimeout=60 --sessionEviction=3600" \\
+  --label app=jenkins \\
+  --label managed-by=forgeops \\
+  ${JENKINS_IMAGE}
+ExecStop=/usr/bin/podman stop -t 20 ${JENKINS_CONTAINER_NAME}
+
+[Install]
+WantedBy=default.target
+SERVICE
 
 systemctl --user daemon-reload
-systemctl --user enable container-jenkins.service
-ok "Systemd service installed: container-jenkins.service"
+systemctl --user enable jenkins.service
+ok "Systemd service installed and enabled: jenkins.service"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Memory snapshot after full install
@@ -381,8 +408,8 @@ podman stats --no-stream "${JENKINS_CONTAINER_NAME}" \
 # ──────────────────────────────────────────────────────────────────────────────
 header "✅  Installation Complete"
 echo ""
-echo -e "  Server:      ${CYAN}Hetzner CAX11  (2 vCPU ARM / 4 GB RAM / 40 GB NVMe)${NC}"
-echo -e "  OS:          ${CYAN}Ubuntu 22.04 (aarch64)${NC}"
+echo -e "  Server:      ${CYAN}Hetzner CX22  (2 vCPU x86_64 / 4 GB RAM / 40 GB NVMe)${NC}"
+echo -e "  OS:          ${CYAN}Ubuntu 24.04 LTS (x86_64)${NC}"
 echo -e "  Podman:      ${CYAN}$(podman --version)  (rootless, daemonless)${NC}"
 echo -e "  Swap:        ${CYAN}${SWAP_SIZE_GB} GB  →  6 GB effective memory${NC}"
 echo -e "  Jenkins RAM: ${CYAN}${JENKINS_MEMORY} container limit  |  ${JENKINS_JVM_MIN_HEAP}→${JENKINS_JVM_MAX_HEAP} heap  |  G1GC${NC}"
@@ -392,8 +419,8 @@ echo ""
 echo -e "  ${YELLOW}Useful commands:${NC}"
 echo -e "    podman logs -f ${JENKINS_CONTAINER_NAME}             # live logs"
 echo -e "    podman stats   ${JENKINS_CONTAINER_NAME}             # RAM/CPU usage"
-echo -e "    systemctl --user status container-jenkins  # service status"
-echo -e "    systemctl --user restart container-jenkins # restart"
+echo -e "    systemctl --user status jenkins      # service status"
+echo -e "    systemctl --user restart jenkins     # restart"
 echo ""
 echo -e "  ${YELLOW}Next steps:${NC}"
 echo -e "    1. Install Nginx:      ${CYAN}sudo apt-get install -y nginx certbot python3-certbot-nginx${NC}"
