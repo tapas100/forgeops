@@ -15,8 +15,8 @@ APP_NAME=""
 IMAGE=""
 HOST_PORT=""
 ENV_FILE=""
-MEMORY="256m"
-CPUS="0.5"
+MEMORY="512m"       # A1.Flex has 12 GB — each app container gets 512 MB
+CPUS="0.5"          # 0.5 of 2 OCPUs per app container
 RESTART_POLICY="unless-stopped"
 # Directory that holds a file named "${APP_NAME}.previous" with the last image ref
 STATE_DIR="/opt/forgeops/state"
